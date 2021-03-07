@@ -1,0 +1,6 @@
+name: ChatSizeChangePlugin
+version: @version@
+main: net.kunmc.lab.chatsizechangeplugin.ChatSizeChangePlugin
+api-version: 1.15
+authors: [ Yu_212 ]
+load: STARTUP
