@@ -10,11 +10,10 @@ import org.bukkit.craftbukkit.v1_15_R1.entity.CraftPlayer;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
-import org.bukkit.event.player.PlayerLoginEvent;
-import org.bukkit.event.server.ServerCommandEvent;
+import org.bukkit.event.player.PlayerCommandPreprocessEvent;
+import org.bukkit.event.player.PlayerJoinEvent;
 import org.bukkit.event.world.WorldLoadEvent;
 import org.bukkit.plugin.java.JavaPlugin;
-import org.bukkit.scheduler.BukkitRunnable;
 
 import java.io.ByteArrayOutputStream;
 import java.io.DataOutputStream;
@@ -42,30 +41,26 @@ public final class ChatSizeChangePlugin extends JavaPlugin implements Listener {
     }
 
     @EventHandler
-    public void onCommand(ServerCommandEvent event) {
-        if (event.getCommand().equalsIgnoreCase("scoresheet fetch")) {
-            if (!(event.getSender() instanceof CraftPlayer)) {
+    public void onCommand(PlayerCommandPreprocessEvent event) {
+        Player sender = event.getPlayer();
+        if (event.getMessage().equalsIgnoreCase("/scoresheet fetch")) {
+            if (!(sender instanceof CraftPlayer)) {
                 return;
             }
-            World world = ((CraftPlayer)event.getSender()).getWorld();
-            new BukkitRunnable() {
-                @Override
-                public void run() {
-                    try {
-                        loadFollowerData((CraftWorld)world);
-                        for (Player player : world.getPlayers()) {
-                            sendFollowerData(player);
-                        }
-                    } catch (IOException e) {
-                        e.printStackTrace();
-                    }
+            World world = sender.getWorld();
+            try {
+                loadFollowerData((CraftWorld)world);
+                for (Player player : world.getPlayers()) {
+                    sendFollowerData(player);
                 }
-            }.runTask(this);
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
         }
     }
 
     @EventHandler
-    public void onPlayerLogin(PlayerLoginEvent event) {
+    public void onPlayerJoin(PlayerJoinEvent event) {
         Player player = event.getPlayer();
         sendFollowerData(player);
     }
@@ -75,11 +70,15 @@ public final class ChatSizeChangePlugin extends JavaPlugin implements Listener {
         ScoreboardObjective objective = scoreboard.getObjective("twitter");
         Map<String, Integer> followerData = new HashMap<>();
         for (ScoreboardScore score : scoreboard.getScoresForObjective(objective)) {
-            followerData.put(score.getPlayerName(), score.getScore());
+            String name = score.getPlayerName();
+            if (name.matches("\\w{3,16}")) {
+                followerData.put(name, score.getScore());
+            }
         }
         try (ByteArrayOutputStream byteArrayStream = new ByteArrayOutputStream(); DataOutputStream stream = new DataOutputStream(byteArrayStream)) {
             stream.writeInt(followerData.size());
             for (Map.Entry<String, Integer> entry : followerData.entrySet()) {
+                stream.writeByte(entry.getKey().length());
                 stream.writeBytes(entry.getKey());
                 stream.writeInt(entry.getValue());
             }
