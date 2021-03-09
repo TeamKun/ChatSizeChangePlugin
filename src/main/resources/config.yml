@@ -1,0 +1,5 @@
+defaultChatSize: 1.0
+minChatSize: 0.1
+maxChatSize: 4.0
+chatSizeMultiply: 1.0
+chatBaseSize: 1.0

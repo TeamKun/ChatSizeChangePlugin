@@ -1,5 +1,7 @@
 package net.kunmc.lab.chatsizechangeplugin;
 
+import net.kunmc.lab.chatsizechangeplugin.config.ConfigCommand;
+import net.kunmc.lab.chatsizechangeplugin.config.ConfigManager;
 import net.minecraft.server.v1_15_R1.ScoreboardObjective;
 import net.minecraft.server.v1_15_R1.ScoreboardScore;
 import net.minecraft.server.v1_15_R1.ScoreboardServer;
@@ -8,64 +10,55 @@ import org.bukkit.World;
 import org.bukkit.craftbukkit.v1_15_R1.CraftWorld;
 import org.bukkit.craftbukkit.v1_15_R1.entity.CraftPlayer;
 import org.bukkit.entity.Player;
-import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
-import org.bukkit.event.player.PlayerCommandPreprocessEvent;
-import org.bukkit.event.player.PlayerJoinEvent;
-import org.bukkit.event.world.WorldLoadEvent;
 import org.bukkit.plugin.java.JavaPlugin;
 
 import java.io.ByteArrayOutputStream;
 import java.io.DataOutputStream;
 import java.io.IOException;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Objects;
 
 public final class ChatSizeChangePlugin extends JavaPlugin implements Listener {
-    private static final String CHANNEL = "chatsizechange:followers";
+    private static final String FOLLOWER_DATA_CHANNEL = "chatsizechange:follower";
+    private static final String CONFIG_CHANGE_CHANNEL = "chatsizechange:config";
+    private static ChatSizeChangePlugin instance;
+    private ConfigManager configManager;
     private byte[] followerDataBytes;
+    private byte[] configDataBytes;
+    private boolean isEnabled;
 
     @Override
     public void onEnable() {
-        getServer().getPluginManager().registerEvents(this, this);
-        Bukkit.getMessenger().registerOutgoingPluginChannel(this, CHANNEL);
+        instance = this;
+        getServer().getPluginManager().registerEvents(new EventListener(), this);
+        Bukkit.getMessenger().registerOutgoingPluginChannel(this, FOLLOWER_DATA_CHANNEL);
+        Bukkit.getMessenger().registerOutgoingPluginChannel(this, CONFIG_CHANGE_CHANNEL);
+        configManager = new ConfigManager();
+        configManager.load();
+        ConfigCommand configCommand = new ConfigCommand();
+        Objects.requireNonNull(getCommand("cscconfig")).setExecutor(configCommand);
+        Objects.requireNonNull(getCommand("cscconfig")).setTabCompleter(configCommand);
+        isEnabled = true;
+        saveConfig();
     }
 
-    @EventHandler
-    public void onWorldLoad(WorldLoadEvent event) {
-        try {
-            loadFollowerData((CraftWorld)event.getWorld());
-        } catch (IOException e) {
-            e.printStackTrace();
-        }
+    @Override
+    public void onDisable() {
+        isEnabled = false;
     }
 
-    @EventHandler
-    public void onCommand(PlayerCommandPreprocessEvent event) {
-        Player sender = event.getPlayer();
-        if (event.getMessage().equalsIgnoreCase("/scoresheet fetch")) {
-            if (!(sender instanceof CraftPlayer)) {
-                return;
-            }
-            World world = sender.getWorld();
-            try {
-                loadFollowerData((CraftWorld)world);
-                for (Player player : world.getPlayers()) {
-                    sendFollowerData(player);
-                }
-            } catch (IOException e) {
-                e.printStackTrace();
-            }
-        }
+    public static ChatSizeChangePlugin getInstance() {
+        return instance;
     }
 
-    @EventHandler
-    public void onPlayerJoin(PlayerJoinEvent event) {
-        Player player = event.getPlayer();
-        sendFollowerData(player);
+    public ConfigManager getConfigManager() {
+        return configManager;
     }
 
-    private void loadFollowerData(CraftWorld world) throws IOException {
+    public void loadFollowerData(CraftWorld world) throws IOException {
         ScoreboardServer scoreboard = world.getHandle().getScoreboard();
         ScoreboardObjective objective = scoreboard.getObjective("twitter");
         Map<String, Integer> followerData = new HashMap<>();
@@ -76,6 +69,7 @@ public final class ChatSizeChangePlugin extends JavaPlugin implements Listener {
             }
         }
         try (ByteArrayOutputStream byteArrayStream = new ByteArrayOutputStream(); DataOutputStream stream = new DataOutputStream(byteArrayStream)) {
+            stream.writeByte(0);
             stream.writeInt(followerData.size());
             for (Map.Entry<String, Integer> entry : followerData.entrySet()) {
                 stream.writeByte(entry.getKey().length());
@@ -86,13 +80,67 @@ public final class ChatSizeChangePlugin extends JavaPlugin implements Listener {
         }
     }
 
-    private void sendFollowerData(Player player) {
+    public void sendFollowerData(Player player) {
         if (followerDataBytes == null) {
             return;
         }
-        if (!player.getListeningPluginChannels().contains(CHANNEL)) {
-            ((CraftPlayer)player).addChannel(CHANNEL);
+        if (!player.getListeningPluginChannels().contains(FOLLOWER_DATA_CHANNEL)) {
+            ((CraftPlayer)player).addChannel(FOLLOWER_DATA_CHANNEL);
         }
-        player.sendPluginMessage(this, CHANNEL, followerDataBytes);
+        player.sendPluginMessage(this, FOLLOWER_DATA_CHANNEL, followerDataBytes);
+    }
+
+    public void loadConfigData() {
+        ConfigManager manager = getConfigManager();
+        try (ByteArrayOutputStream byteArrayStream = new ByteArrayOutputStream(); DataOutputStream stream = new DataOutputStream(byteArrayStream)) {
+            stream.writeByte(1);
+            stream.writeDouble(manager.getDefaultChatSize());
+            stream.writeDouble(manager.getMinChatSize());
+            stream.writeDouble(manager.getMaxChatSize());
+            stream.writeDouble(manager.getChatSizeMultiply());
+            stream.writeDouble(manager.getChatBaseSize());
+            configDataBytes = byteArrayStream.toByteArray();
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    public void sendConfigData(Player player) {
+        if (configDataBytes == null) {
+            return;
+        }
+        if (!player.getListeningPluginChannels().contains(CONFIG_CHANGE_CHANNEL)) {
+            ((CraftPlayer)player).addChannel(CONFIG_CHANGE_CHANNEL);
+        }
+        System.out.println(Arrays.toString(configDataBytes));
+        player.sendPluginMessage(this, CONFIG_CHANGE_CHANNEL, configDataBytes);
+    }
+
+    @Override
+    public void reloadConfig() {
+        super.reloadConfig();
+        if (!isEnabled) {
+            return;
+        }
+        loadConfigData();
+        for (World world : Bukkit.getWorlds()) {
+            for (Player player : world.getPlayers()) {
+                sendConfigData(player);
+            }
+        }
+    }
+
+    @Override
+    public void saveConfig() {
+        super.saveConfig();
+        if (!isEnabled) {
+            return;
+        }
+        loadConfigData();
+        for (World world : Bukkit.getWorlds()) {
+            for (Player player : world.getPlayers()) {
+                sendConfigData(player);
+            }
+        }
     }
 }

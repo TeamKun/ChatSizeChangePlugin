@@ -4,3 +4,10 @@ main: net.kunmc.lab.chatsizechangeplugin.ChatSizeChangePlugin
 api-version: 1.15
 authors: [ Yu_212 ]
 load: STARTUP
+permissions:
+  chatsizechange.configcommand:
+    default: op
+commands:
+  cscconfig:
+    usage: /cscconfig <set|reload> <value>
+    permission: chatsizechange.configcommand
